@@ -1,0 +1,47 @@
+SELECT 
+    DOC.SOURCE_NUMBER AS TERMINAL_ID, -- Mã thiết bị
+	
+	CONCAT(substr(doc.TARGET_NUMBER,1,6), substr(doc.TARGET_NUMBER,-4)) as CARD_NUMBER,
+    DOC.SOURCE_CONTRACT AS ATM_ID, -- Mã RECORD(ONUS)
+	
+    TO_CHAR(DOC.TRANS_DATE, 'DD/MM/YY') AS TRANS_DATE, -- Ngày thuc hien giao dịch
+	
+    TO_CHAR(DOC.TRANS_DATE, 'HH24:MI:SS') AS TRANS_TIME, -- Thời gian thuc hien giao dịch
+	
+    DOC.RET_REF_NUMBER AS RRN_SRN_NO, -- Số ref cua he thong switch
+	
+    SUBSTR(DOC.RET_REF_NUMBER, -6) AS SEQ_ATM, -- 6 số cuối của RRN
+	
+    DECODE(DOC.TRANS_TYPE, 13, 'ATM') AS TRX_NAME, -- Loại giao dịch
+	
+    REGEXP_SUBSTR(ADD_INFO, 'ISS_FEE=([^|]+)', 1, 1, NULL, 1) AS FEE,
+	
+    REGEXP_SUBSTR(ADD_INFO, 'ISS_FEE_VAT=([^|]+)', 1, 1, NULL, 1) AS VAT,
+	
+    DOC.TRANS_AMOUNT AS TRANS_AMOUNT, -- Số tiền giao dịch
+    CASE 
+        WHEN DOC.TARGET_CONTRACT IS NOT NULL THEN ACCOUNT.GL_NUMBER
+		
+        WHEN DOC.ADD_INFO IS NOT NULL THEN REGEXP_SUBSTR(DOC.ADD_INFO, 'NEXT-NUMBER=([^|]+)', 1, 1, NULL, 1)	
+		
+        ELSE NULL
+    END AS DEBIT_ACCOUNT, -- Tài khoản trích nợ
+	
+    ACCOUNT.GL_NUMBER AS CREDIT_ACCOUNT, -- Số tài khoản nhận/nộp tiền của giao dịch chuyển khoản, nộp tiền (CFF, FD)
+	
+    DOC.RETURN_CODE AS TRANS_STATUS -- Trạng thái giao dịch
+	
+FROM  DOC
+
+LEFT JOIN 
+    ACCOUNT ON ACCOUNT.ACNT_CONTRACT__OID = DOC.TARGET_CONTRACT 
+WHERE 
+    DOC.TRANS_DATE BETWEEN TO_DATE(:START_DATE, 'DD/MM/YY') AND TO_DATE(:END_DATE, 'DD/MM/YY') -- Lọc theo ngày
+    AND DOC.SOURCE_NUMBER = NVL(:TERMINAL_ID, DOC.SOURCE_NUMBER) -- Lọc theo mã thiết bị (nếu có)
+    AND (
+        :CARD_NUMBER_START IS NULL OR
+        :CARD_NUMBER_END IS NULL OR 
+        (SUBSTR(DOC.TARGET_NUMBER, 1, 6) = :CARD_NUMBER_START AND SUBSTR(DOC.TARGET_NUMBER, -4) = :CARD_NUMBER_END)
+    ) -- Lọc số thẻ
+ORDER BY 
+    DOC.TRANS_TIME ASC; -- Sắp xếp theo thời gian giao dịch
