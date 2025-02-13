@@ -1,0 +1,88 @@
+CREATE OR REPLACE PACKAGE WAY4REP.TEST_01 AS 
+    PROCEDURE TEST_PROCEDURE_ACQ01;
+END TEST_01;
+/
+
+CREATE OR REPLACE PACKAGE BODY WAY4REP.TEST_01 AS
+    PROCEDURE TEST_PROCEDURE_ACQ01 IS 
+        V_START_TIME TIMESTAMP;
+        V_END_TIME TIMESTAMP;
+        V_RETURN_MESSAGE VARCHAR2(4000	);
+    BEGIN
+        V_START_TIME := SYSTIMESTAMP;
+
+        INSERT INTO TEST (
+            TERMINAL_ID,
+            CARD_NUMBER,
+            ATM_ID,
+            TRANS_DATE,
+            TRANS_TIME,
+            RRN_SRN_NO,
+            SEQ_ATM,
+            TRX_NAME,
+            FEE,
+            VAT,
+            TRANS_AMOUNT,
+            DEBIT_ACCOUNT,
+            CREDIT_ACCOUNT,
+            TRANSACTION_STATUS
+        )
+        SELECT 
+            DOC.SOURCE_NUMBER AS TERMINAL_ID,
+            SUBSTR(DOC.TARGET_NUMBER, 1, 6) || '****' || 
+            SUBSTR(DOC.TARGET_NUMBER, LENGTH(DOC.TARGET_NUMBER) - 3, 4) AS CARD_NUMBER,
+            DOC.SOURCE_CONTRACT AS ATM_ID,
+            TO_CHAR(DOC.TRANS_DATE, 'DD-MON-YYYY') AS TRANS_DATE,
+            TO_CHAR(DOC.TRANS_DATE, 'HH24:MI:SS') AS TRANS_TIME,
+            DOC.RET_REF_NUMBER AS RRN_SRN_NO,
+            SUBSTR(DOC.RET_REF_NUMBER, -6) AS SEQ_ATM,
+            DECODE(DOC.TRANS_TYPE, 13, 'ATM') AS TRX_NAME,
+            REGEXP_SUBSTR(DOC.ADD_INFO, 'ISS_FEE=([0-9]+)', 1, 1, NULL, 1) AS FEE,
+            REGEXP_SUBSTR(DOC.ADD_INFO, 'ISS_FEE_VAT=([0-9]+)',1,1,NULL,1) AS VAT,
+            DOC.TRANS_AMOUNT AS TRANS_AMOUNT,
+            CASE 
+                WHEN DOC.TARGET_CONTRACT IS NOT NULL THEN ACCOUNT.GL_NUMBER
+                WHEN DOC.ADD_INFO IS NOT NULL THEN 
+                    CAST(REGEXP_SUBSTR(DOC.ADD_INFO, 'NEXT-NUMBER=([^|]+)', 1, 1, NULL, 1) AS VARCHAR2(100))
+                ELSE NULL
+            END AS DEBIT_ACCOUNT,
+            ACCOUNT.GL_NUMBER AS CREDIT_ACCOUNT,
+            DOC.RETURN_CODE AS TRANSACTION_STATUS
+        FROM 
+            SRC_WAY4_DOC_TODAY DOC
+        LEFT JOIN 
+            SRC_WAY4_ACCOUNT ACCOUNT ON ACCOUNT.ACNT_CONTRACT__OID = DOC.TARGET_CONTRACT
+        WHERE 
+            1=1;
+
+        V_END_TIME := SYSTIMESTAMP;
+
+        -- Lưu log thành công
+        INSERT INTO CORE_REPORT_TRACK_LOG (REPORT_NAME, START_TIME, END_TIME, DESC_ERR)
+        VALUES (
+            'INSERT_TABLE_TEST_PROCEDURE_ACQ01',
+            V_START_TIME,
+            V_END_TIME,
+            'SUCCESS'
+        );
+
+        COMMIT;
+    EXCEPTION
+        WHEN OTHERS THEN
+            V_END_TIME := SYSTIMESTAMP;
+            V_RETURN_MESSAGE := SQLERRM;
+
+            -- Lưu log lỗi trước khi rollback
+            INSERT INTO CORE_REPORT_TRACK_LOG (REPORT_NAME, START_TIME, END_TIME, DESC_ERR)
+            VALUES (
+                'INSERT_TABLE_TEST_PROCEDURE_ACQ01',
+                V_START_TIME,
+                V_END_TIME,
+                V_RETURN_MESSAGE
+            );
+
+            ROLLBACK; -- Rollback sau khi lưu log lỗi
+            COMMIT; -- Commit để lưu log lỗi (nếu cần)
+    END TEST_PROCEDURE_ACQ01;
+END TEST_01;
+/
